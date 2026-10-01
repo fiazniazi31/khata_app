@@ -8,6 +8,7 @@ import '../models/category.dart';
 import '../models/income.dart';
 import '../models/account.dart';
 import '../models/account_transfer.dart';
+import '../models/savings_transaction.dart';
 import '../utils/expense_constants.dart';
 
 class DatabaseHelper {
@@ -28,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -118,6 +119,19 @@ class DatabaseHelper {
         amount REAL NOT NULL,
         date TEXT NOT NULL,
         note TEXT DEFAULT ''
+      )
+    ''');
+
+    // Savings Table (v6)
+    await db.execute('''
+      CREATE TABLE savingsTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount REAL NOT NULL,
+        transactionType TEXT NOT NULL,
+        transactionDate TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
       )
     ''');
 
@@ -243,6 +257,25 @@ class DatabaseHelper {
       }
 
       await _seedDefaultAccounts(db);
+    }
+
+    if (oldVersion < 6) {
+      // Upgrade from v5 to v6 (Add Savings Table)
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS savingsTable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount REAL NOT NULL,
+            transactionType TEXT NOT NULL,
+            transactionDate TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          )
+        ''');
+      } catch (e) {
+        print("Create savingsTable error: $e");
+      }
     }
   }
 
@@ -662,6 +695,9 @@ class DatabaseHelper {
       await db.delete('incomeTable');
     } catch (_) {}
     try {
+      await db.delete('savingsTable');
+    } catch (_) {}
+    try {
       await db.update('catogeryTable', {
         'enteries': 0,
         'totalAmount': '0.0',
@@ -774,6 +810,59 @@ class DatabaseHelper {
   Future<void> insertTransferRaw(Map<String, dynamic> map) async {
     final db = await instance.database;
     await db.insert('accountTransfers', map, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // --- Savings CRUD (v6) ---
+
+  Future<int> insertSavingsTransaction(SavingsTransaction transaction) async {
+    final db = await instance.database;
+    return await db.insert('savingsTable', transaction.toMap());
+  }
+
+  Future<int> updateSavingsTransaction(SavingsTransaction transaction) async {
+    final db = await instance.database;
+    return await db.update(
+      'savingsTable',
+      transaction.toMap(),
+      where: 'id = ?',
+      whereArgs: [transaction.id],
+    );
+  }
+
+  Future<int> deleteSavingsTransaction(int id) async {
+    final db = await instance.database;
+    return await db.delete(
+      'savingsTable',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<List<SavingsTransaction>> getAllSavingsTransactions() async {
+    final db = await instance.database;
+    final result = await db.query(
+      'savingsTable',
+      orderBy: 'transactionDate ASC, id ASC',
+    );
+    return result.map((json) => SavingsTransaction.fromMap(json)).toList();
+  }
+
+  Future<SavingsTransaction?> getSavingsTransactionById(int id) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'savingsTable',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (result.isNotEmpty) {
+      return SavingsTransaction.fromMap(result.first);
+    }
+    return null;
+  }
+
+  Future<void> insertSavingsRaw(Map<String, dynamic> map) async {
+    final db = await instance.database;
+    await db.insert('savingsTable', map, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future close() async {

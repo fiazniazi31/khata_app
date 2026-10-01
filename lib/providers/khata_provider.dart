@@ -11,6 +11,7 @@ import '../models/category.dart';
 import '../models/income.dart';
 import '../models/account.dart';
 import '../models/account_transfer.dart';
+import '../models/savings_transaction.dart';
 
 enum CustomerFilter { all, oweYou, youOwe }
 
@@ -42,6 +43,10 @@ class KhataProvider extends ChangeNotifier {
   // Multi-Account & Wallet States (v5)
   List<Account> _accounts = [];
   List<AccountTransfer> _accountTransfers = [];
+
+  // Savings States (v6)
+  List<SavingsTransaction> _allSavings = [];
+  DateTime _selectedSavingsMonth = DateTime.now();
 
   // Settings
   ThemeMode _themeMode = ThemeMode.light;
@@ -122,6 +127,83 @@ class KhataProvider extends ChangeNotifier {
   List<Account> get accounts => _accounts;
   List<AccountTransfer> get accountTransfers => _accountTransfers;
   double get totalAccountBalance => _accounts.fold(0.0, (sum, a) => sum + a.balance);
+
+  // Savings Getters (v6)
+  DateTime get selectedSavingsMonth => _selectedSavingsMonth;
+  List<SavingsTransaction> get allSavings => _allSavings;
+
+  double get totalSavingsDeposits =>
+      _allSavings.where((s) => s.isDeposit).fold(0.0, (sum, s) => sum + s.amount);
+
+  double get totalSavingsWithdrawals =>
+      _allSavings.where((s) => s.isWithdrawal).fold(0.0, (sum, s) => sum + s.amount);
+
+  double get totalSavingsBalance => totalSavingsDeposits - totalSavingsWithdrawals;
+
+  List<SavingsTransaction> get monthlySavings {
+    return _allSavings.where((s) =>
+      s.transactionDate.year == _selectedSavingsMonth.year &&
+      s.transactionDate.month == _selectedSavingsMonth.month
+    ).toList();
+  }
+
+  double get monthlySavingsDeposited {
+    return monthlySavings.where((s) => s.isDeposit).fold(0.0, (sum, s) => sum + s.amount);
+  }
+
+  double get monthlySavingsWithdrawn {
+    return monthlySavings.where((s) => s.isWithdrawal).fold(0.0, (sum, s) => sum + s.amount);
+  }
+
+  double get monthlyNetSavings => monthlySavingsDeposited - monthlySavingsWithdrawn;
+
+  double get monthlySavingsOpeningBalance {
+    final startOfMonth = DateTime(_selectedSavingsMonth.year, _selectedSavingsMonth.month, 1);
+    final prior = _allSavings.where((s) => s.transactionDate.isBefore(startOfMonth));
+    final dep = prior.where((s) => s.isDeposit).fold(0.0, (sum, s) => sum + s.amount);
+    final wdr = prior.where((s) => s.isWithdrawal).fold(0.0, (sum, s) => sum + s.amount);
+    return dep - wdr;
+  }
+
+  double get monthlySavingsClosingBalance => monthlySavingsOpeningBalance + monthlyNetSavings;
+
+  double get currentMonthNetSavings {
+    final now = DateTime.now();
+    final cur = _allSavings.where((s) =>
+      s.transactionDate.year == now.year &&
+      s.transactionDate.month == now.month
+    );
+    final dep = cur.where((s) => s.isDeposit).fold(0.0, (sum, s) => sum + s.amount);
+    final wdr = cur.where((s) => s.isWithdrawal).fold(0.0, (sum, s) => sum + s.amount);
+    return dep - wdr;
+  }
+
+  List<SavingsTransaction> computeRunningBalances(List<SavingsTransaction> list) {
+    final sorted = List<SavingsTransaction>.from(list)
+      ..sort((a, b) {
+        final cmp = a.transactionDate.compareTo(b.transactionDate);
+        if (cmp != 0) return cmp;
+        final idA = a.id ?? 0;
+        final idB = b.id ?? 0;
+        return idA.compareTo(idB);
+      });
+
+    double balance = 0.0;
+    final List<SavingsTransaction> withBalances = [];
+    for (final t in sorted) {
+      if (t.isDeposit) {
+        balance += t.amount;
+      } else {
+        balance -= t.amount;
+      }
+      withBalances.add(t.copyWith(runningBalance: balance));
+    }
+    return withBalances;
+  }
+
+  List<SavingsTransaction> get allSavingsWithRunningBalance {
+    return computeRunningBalances(_allSavings);
+  }
 
   ThemeMode get themeMode => _themeMode;
   String get currencySymbol => _currencySymbol;
@@ -261,12 +343,13 @@ class KhataProvider extends ChangeNotifier {
       _totalYouOwe = tempYouOwe;
       _netBalance = tempOweYou - tempYouOwe;
 
-      // 2. Fetch all Expenses, Incomes, Categories, Accounts (v5)
+      // 2. Fetch all Expenses, Incomes, Categories, Accounts, Savings (v6)
       _allExpenses = await _dbHelper.getAllExpenses();
       _allIncomes = await _dbHelper.getAllIncomes();
       _expenseCategories = await _dbHelper.getAllCategories();
       _accounts = await _dbHelper.getAllAccounts();
       _accountTransfers = await _dbHelper.getAllTransfers();
+      _allSavings = await _dbHelper.getAllSavingsTransactions();
 
       _applyFilters();
     } catch (e) {
@@ -583,6 +666,110 @@ class KhataProvider extends ChangeNotifier {
   Future<void> wipeAllData() async {
     await _dbHelper.clearDatabase();
     await refreshData();
+  }
+
+  // --- Savings Tracking Actions (v6) ---
+
+  void setSelectedSavingsMonth(DateTime date) {
+    _selectedSavingsMonth = date;
+    notifyListeners();
+  }
+
+  Future<String?> addSavingsTransaction(SavingsTransaction transaction) async {
+    if (transaction.amount <= 0) {
+      return "Amount must be greater than 0";
+    }
+
+    if (transaction.isWithdrawal) {
+      if (transaction.amount > totalSavingsBalance) {
+        return "Insufficient savings balance.\nAvailable balance: $_currencySymbol${totalSavingsBalance.toStringAsFixed(2)}";
+      }
+
+      // Check chronological simulation
+      final simulatedList = List<SavingsTransaction>.from(_allSavings)..add(transaction);
+      simulatedList.sort((a, b) {
+        final cmp = a.transactionDate.compareTo(b.transactionDate);
+        if (cmp != 0) return cmp;
+        return (a.id ?? 0).compareTo(b.id ?? 0);
+      });
+
+      double running = 0.0;
+      for (final t in simulatedList) {
+        running += t.isDeposit ? t.amount : -t.amount;
+        if (running < -0.0001) {
+          return "Insufficient savings balance at this transaction date.\nAvailable balance: $_currencySymbol${totalSavingsBalance.toStringAsFixed(2)}";
+        }
+      }
+    }
+
+    try {
+      await _dbHelper.insertSavingsTransaction(transaction);
+      await refreshData();
+      return null;
+    } catch (e) {
+      return "Failed to save transaction: $e";
+    }
+  }
+
+  Future<String?> updateSavingsTransaction(SavingsTransaction transaction) async {
+    if (transaction.amount <= 0) {
+      return "Amount must be greater than 0";
+    }
+
+    final index = _allSavings.indexWhere((s) => s.id == transaction.id);
+    if (index == -1) {
+      return "Transaction not found";
+    }
+
+    // Simulate replacement
+    final simulatedList = List<SavingsTransaction>.from(_allSavings);
+    simulatedList[index] = transaction;
+    simulatedList.sort((a, b) {
+      final cmp = a.transactionDate.compareTo(b.transactionDate);
+      if (cmp != 0) return cmp;
+      return (a.id ?? 0).compareTo(b.id ?? 0);
+    });
+
+    double running = 0.0;
+    for (final t in simulatedList) {
+      running += t.isDeposit ? t.amount : -t.amount;
+      if (running < -0.0001) {
+        return "Cannot update transaction: Insufficient balance. Available balance would drop below zero.";
+      }
+    }
+
+    try {
+      await _dbHelper.updateSavingsTransaction(transaction);
+      await refreshData();
+      return null;
+    } catch (e) {
+      return "Failed to update transaction: $e";
+    }
+  }
+
+  Future<String?> deleteSavingsTransaction(int id) async {
+    final simulatedList = _allSavings.where((s) => s.id != id).toList();
+    simulatedList.sort((a, b) {
+      final cmp = a.transactionDate.compareTo(b.transactionDate);
+      if (cmp != 0) return cmp;
+      return (a.id ?? 0).compareTo(b.id ?? 0);
+    });
+
+    double running = 0.0;
+    for (final t in simulatedList) {
+      running += t.isDeposit ? t.amount : -t.amount;
+      if (running < -0.0001) {
+        return "Cannot delete this deposit because subsequent withdrawals depend on this balance.";
+      }
+    }
+
+    try {
+      await _dbHelper.deleteSavingsTransaction(id);
+      await refreshData();
+      return null;
+    } catch (e) {
+      return "Failed to delete transaction: $e";
+    }
   }
 
   // Helper getters for individual customers

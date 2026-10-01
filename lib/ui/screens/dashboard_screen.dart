@@ -11,6 +11,7 @@ import 'settings_screen.dart';
 import 'expense_tab.dart'; // v3
 import 'analytics_tab.dart'; // v5
 import 'accounts_screen.dart'; // v5
+import 'savings_screen.dart'; // v6
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -76,8 +77,92 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               // Summary card section
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
                 child: BalanceCard(provider: provider),
+              ),
+
+              // Savings Summary Card (v6)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _currentTabIndex = 2; // Switch to Savings tab
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: theme.brightness == Brightness.dark
+                          ? const Color(0xFF1E293B)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withOpacity(0.3),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.02),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withOpacity(0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.savings_outlined, color: Color(0xFF10B981), size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Savings",
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "$currency ${provider.totalSavingsBalance.toStringAsFixed(0)}",
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text(
+                              "This Month",
+                              style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "${provider.currentMonthNetSavings >= 0 ? '+' : '-'} $currency${provider.currentMonthNetSavings.abs().toStringAsFixed(0)}",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: provider.currentMonthNetSavings >= 0
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFFEF4444),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
               ),
 
               // Search & Filter Container
@@ -280,11 +365,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Tab 1: Expense Tracker Tab
           const ExpenseTab(),
 
-          // Tab 2: Analytics Tab (v5)
+          // Tab 2: Savings Tab (v6)
+          const SavingsScreen(),
+
+          // Tab 3: Analytics Tab (v5)
           const AnalyticsTab(),
         ];
 
-        final titles = ["Khata Book", "Expense Tracker", "Analytics & Insights"];
+        final titles = ["Khata Book", "Expense Tracker", "Savings", "Analytics & Insights"];
 
         return Scaffold(
           appBar: AppBar(
@@ -338,6 +426,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: Icon(Icons.payments_outlined),
                 selectedIcon: Icon(Icons.payments_rounded),
                 label: "Expenses",
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.savings_outlined),
+                selectedIcon: Icon(Icons.savings_rounded),
+                label: "Savings",
               ),
               NavigationDestination(
                 icon: Icon(Icons.bar_chart_rounded),

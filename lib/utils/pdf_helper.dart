@@ -8,6 +8,7 @@ import '../models/customer.dart';
 import '../models/transaction.dart';
 import '../models/expense.dart';
 import '../models/income.dart';
+import '../models/savings_transaction.dart';
 
 class PdfHelper {
   static Future<File> generateLedgerPdf({
@@ -475,6 +476,256 @@ class PdfHelper {
     // Save report to temporary dir
     final tempDir = await getTemporaryDirectory();
     final file = File(p.join(tempDir.path, 'income_expense_report_${DateFormat('MMM_yyyy').format(selectedMonth)}.pdf'));
+    await file.writeAsBytes(await pdf.save());
+    return file;
+  }
+
+  static Future<File> generateSavingsReportPdf({
+    required String periodTitle,
+    required double openingBalance,
+    required double totalDeposits,
+    required double totalWithdrawals,
+    required double closingBalance,
+    required List<SavingsTransaction> transactions,
+    required String currency,
+  }) async {
+    final pdf = pw.Document();
+    final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now());
+    final netPeriod = totalDeposits - totalWithdrawals;
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context context) {
+          return [
+            // Header
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      "SAVINGS STATEMENT",
+                      style: pw.TextStyle(
+                        fontSize: 22,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.teal,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text("Report Period: $periodTitle", style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.grey700)),
+                    pw.Text("Generated on: $dateStr", style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey)),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text("Khata App", style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                    pw.Text("Savings Ledger Statement", style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey)),
+                  ],
+                ),
+              ],
+            ),
+            pw.Divider(thickness: 1.5, color: PdfColors.grey300),
+            pw.SizedBox(height: 16),
+
+            // Summary Panel
+            pw.Container(
+              padding: const pw.EdgeInsets.all(16),
+              decoration: const pw.BoxDecoration(
+                color: PdfColors.grey100,
+                borderRadius: pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        "Period Summary",
+                        style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.Row(
+                        children: [
+                          pw.Text(
+                            "Net Period Movement: ",
+                            style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700),
+                          ),
+                          pw.Text(
+                            "${netPeriod >= 0 ? '+' : '-'} $currency${netPeriod.abs().toStringAsFixed(2)}",
+                            style: pw.TextStyle(
+                              fontSize: 13,
+                              fontWeight: pw.FontWeight.bold,
+                              color: netPeriod >= 0 ? PdfColors.green : PdfColors.red,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 10),
+                  pw.Divider(thickness: 0.5, color: PdfColors.grey400),
+                  pw.SizedBox(height: 8),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text("OPENING BALANCE", style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                          pw.SizedBox(height: 2),
+                          pw.Text("$currency${openingBalance.toStringAsFixed(2)}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text("TOTAL DEPOSITS", style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                          pw.SizedBox(height: 2),
+                          pw.Text("$currency${totalDeposits.toStringAsFixed(2)}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.green, fontSize: 12)),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text("TOTAL WITHDRAWALS", style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                          pw.SizedBox(height: 2),
+                          pw.Text("$currency${totalWithdrawals.toStringAsFixed(2)}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red, fontSize: 12)),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text("CLOSING BALANCE", style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                          pw.SizedBox(height: 2),
+                          pw.Text("$currency${closingBalance.toStringAsFixed(2)}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.teal, fontSize: 12)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+
+            // Table Header
+            pw.Text(
+              "TRANSACTIONS BREAKDOWN (${transactions.length} Entries)",
+              style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
+
+            // Table of Transactions
+            if (transactions.isEmpty)
+              pw.Container(
+                padding: const pw.EdgeInsets.all(16),
+                alignment: pw.Alignment.center,
+                child: pw.Text("No transactions found for this period.", style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey)),
+              )
+            else
+              pw.Table(
+                border: pw.TableBorder.symmetric(
+                  inside: const pw.BorderSide(color: PdfColors.grey200, width: 0.5),
+                  outside: const pw.BorderSide(color: PdfColors.grey300, width: 1),
+                ),
+                columnWidths: const {
+                  0: pw.FlexColumnWidth(2.5), // Date
+                  1: pw.FlexColumnWidth(2),   // Type
+                  2: pw.FlexColumnWidth(2.5), // Amount
+                  3: pw.FlexColumnWidth(3.5), // Note
+                  4: pw.FlexColumnWidth(2.5), // Running Balance
+                },
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                    children: [
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text("Date", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text("Type", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text("Amount ($currency)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9), textAlign: pw.TextAlign.right)),
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text("Note", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text("Balance ($currency)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9), textAlign: pw.TextAlign.right)),
+                    ],
+                  ),
+                  ...transactions.map((item) {
+                    final formattedDate = DateFormat('dd MMM yyyy').format(item.transactionDate);
+                    final isDep = item.isDeposit;
+                    final runBal = item.runningBalance != null ? item.runningBalance!.toStringAsFixed(2) : '-';
+                    return pw.TableRow(
+                      children: [
+                        pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text(formattedDate, style: const pw.TextStyle(fontSize: 8))),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text(
+                            isDep ? "Deposit" : "Withdrawal",
+                            style: pw.TextStyle(
+                              fontSize: 8,
+                              fontWeight: pw.FontWeight.bold,
+                              color: isDep ? PdfColors.green : PdfColors.red,
+                            ),
+                          ),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text(
+                            "${isDep ? '+' : '-'} ${item.amount.toStringAsFixed(2)}",
+                            style: pw.TextStyle(
+                              fontSize: 8,
+                              fontWeight: pw.FontWeight.bold,
+                              color: isDep ? PdfColors.green : PdfColors.red,
+                            ),
+                            textAlign: pw.TextAlign.right,
+                          ),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text(
+                            item.note.isEmpty ? '-' : item.note,
+                            style: const pw.TextStyle(fontSize: 8),
+                          ),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text(
+                            runBal,
+                            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                            textAlign: pw.TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+            pw.SizedBox(height: 24),
+
+            // Footer Signature section
+            pw.Align(
+              alignment: pw.Alignment.bottomRight,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Container(
+                    width: 120,
+                    decoration: const pw.BoxDecoration(
+                      border: pw.Border(top: pw.BorderSide(color: PdfColors.black, width: 1)),
+                    ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text("Authorized Signature", style: const pw.TextStyle(fontSize: 9)),
+                ],
+              ),
+            ),
+          ];
+        },
+      ),
+    );
+
+    final tempDir = await getTemporaryDirectory();
+    final sanitizedTitle = periodTitle.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final file = File(p.join(tempDir.path, 'savings_report_${sanitizedTitle}_${DateTime.now().millisecondsSinceEpoch}.pdf'));
     await file.writeAsBytes(await pdf.save());
     return file;
   }

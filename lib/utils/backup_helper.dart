@@ -17,9 +17,10 @@ class BackupHelper {
     final incomes = await db.getAllIncomes();
     final accounts = await db.getAllAccounts();
     final transfers = await db.getAllTransfers();
+    final savings = await db.getAllSavingsTransactions();
 
     final backupData = {
-      'backupVersion': 5,
+      'backupVersion': 6,
       'timestamp': DateTime.now().toIso8601String(),
       'customers': customers.map((c) => c.toMap()).toList(),
       'transactions': transactions.map((t) => t.toMap()).toList(),
@@ -28,6 +29,7 @@ class BackupHelper {
       'incomes': incomes.map((i) => i.toMap()).toList(),
       'accounts': accounts.map((a) => a.toMap()).toList(),
       'transfers': transfers.map((tr) => tr.toMap()).toList(),
+      'savings': savings.map((s) => s.toMap()).toList(),
     };
 
     return json.encode(backupData);
@@ -103,6 +105,13 @@ class BackupHelper {
       for (var trMap in transfersData) {
         final Map<String, dynamic> cleanTransfer = Map<String, dynamic>.from(trMap as Map);
         await db.insertTransferRaw(cleanTransfer);
+      }
+
+      // Insert savings (v6)
+      final savingsData = map['savings'] as List<dynamic>? ?? [];
+      for (var sMap in savingsData) {
+        final Map<String, dynamic> cleanSavings = Map<String, dynamic>.from(sMap as Map);
+        await db.insertSavingsRaw(cleanSavings);
       }
 
       return true;

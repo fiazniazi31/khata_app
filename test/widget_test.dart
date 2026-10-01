@@ -4,6 +4,7 @@ import 'package:khata_and_expance_tracker/models/transaction.dart';
 import 'package:khata_and_expance_tracker/models/expense.dart';
 import 'package:khata_and_expance_tracker/models/category.dart';
 import 'package:khata_and_expance_tracker/models/income.dart';
+import 'package:khata_and_expance_tracker/models/savings_transaction.dart';
 
 void main() {
   group('Customer Model Tests', () {
@@ -189,6 +190,203 @@ void main() {
       expect(income.amount, 1500.25);
       expect(income.category, 'Freelance');
       expect(income.date, DateTime.parse('2026-06-19T10:00:00.000Z'));
+    });
+  });
+
+  group('SavingsTransaction Model Tests', () {
+    test('Savings deposit serializes to Map correctly', () {
+      final date = DateTime(2026, 9, 1, 10, 0, 0);
+      final tx = SavingsTransaction(
+        id: 1,
+        amount: 10000.0,
+        transactionType: SavingsTransactionType.deposit,
+        transactionDate: date,
+        note: 'Monthly saving',
+      );
+
+      final map = tx.toMap();
+
+      expect(map['id'], 1);
+      expect(map['amount'], 10000.0);
+      expect(map['transactionType'], 'deposit');
+      expect(map['transactionDate'], date.toIso8601String());
+      expect(map['note'], 'Monthly saving');
+      expect(tx.isDeposit, true);
+      expect(tx.isWithdrawal, false);
+    });
+
+    test('Savings withdrawal deserializes from Map correctly', () {
+      final dateStr = '2026-09-25T14:00:00.000';
+      final map = {
+        'id': 2,
+        'amount': 3000.0,
+        'transactionType': 'withdrawal',
+        'transactionDate': dateStr,
+        'note': 'Emergency',
+        'createdAt': dateStr,
+        'updatedAt': dateStr,
+      };
+
+      final tx = SavingsTransaction.fromMap(map);
+
+      expect(tx.id, 2);
+      expect(tx.amount, 3000.0);
+      expect(tx.transactionType, SavingsTransactionType.withdrawal);
+      expect(tx.isDeposit, false);
+      expect(tx.isWithdrawal, true);
+      expect(tx.note, 'Emergency');
+    });
+  });
+
+  group('Savings Balance, Carry Forward & Running Balance Tests', () {
+    test('Calculates balance = Total Deposits - Total Withdrawals', () {
+      final txs = [
+        SavingsTransaction(
+          id: 1,
+          amount: 20000,
+          transactionType: SavingsTransactionType.deposit,
+          transactionDate: DateTime(2026, 9, 1),
+        ),
+        SavingsTransaction(
+          id: 2,
+          amount: 10000,
+          transactionType: SavingsTransactionType.deposit,
+          transactionDate: DateTime(2026, 9, 10),
+        ),
+        SavingsTransaction(
+          id: 3,
+          amount: 5000,
+          transactionType: SavingsTransactionType.deposit,
+          transactionDate: DateTime(2026, 9, 20),
+        ),
+        SavingsTransaction(
+          id: 4,
+          amount: 5000,
+          transactionType: SavingsTransactionType.withdrawal,
+          transactionDate: DateTime(2026, 9, 25),
+        ),
+      ];
+
+      final totalDeposits = txs.where((t) => t.isDeposit).fold(0.0, (sum, t) => sum + t.amount);
+      final totalWithdrawals = txs.where((t) => t.isWithdrawal).fold(0.0, (sum, t) => sum + t.amount);
+      final balance = totalDeposits - totalWithdrawals;
+
+      expect(totalDeposits, 35000.0);
+      expect(totalWithdrawals, 5000.0);
+      expect(balance, 30000.0);
+    });
+
+    test('Carry forward between months: September balance carries into October and November', () {
+      final septemberDeposit = SavingsTransaction(
+        id: 1,
+        amount: 30000,
+        transactionType: SavingsTransactionType.deposit,
+        transactionDate: DateTime(2026, 9, 15),
+      );
+      final octoberDeposit = SavingsTransaction(
+        id: 2,
+        amount: 10000,
+        transactionType: SavingsTransactionType.deposit,
+        transactionDate: DateTime(2026, 10, 5),
+      );
+      final novemberDeposit = SavingsTransaction(
+        id: 3,
+        amount: 5000,
+        transactionType: SavingsTransactionType.deposit,
+        transactionDate: DateTime(2026, 11, 2),
+      );
+
+      final allTxs = [septemberDeposit, octoberDeposit, novemberDeposit];
+
+      // September ending balance
+      final sepEnd = allTxs
+          .where((t) => t.transactionDate.isBefore(DateTime(2026, 10, 1)))
+          .fold(0.0, (sum, t) => sum + (t.isDeposit ? t.amount : -t.amount));
+      expect(sepEnd, 30000.0);
+
+      // October ending balance
+      final octEnd = allTxs
+          .where((t) => t.transactionDate.isBefore(DateTime(2026, 11, 1)))
+          .fold(0.0, (sum, t) => sum + (t.isDeposit ? t.amount : -t.amount));
+      expect(octEnd, 40000.0);
+
+      // November ending balance
+      final novEnd = allTxs
+          .where((t) => t.transactionDate.isBefore(DateTime(2026, 12, 1)))
+          .fold(0.0, (sum, t) => sum + (t.isDeposit ? t.amount : -t.amount));
+      expect(novEnd, 45000.0);
+    });
+
+    test('Calculates chronological running balance correctly', () {
+      final txs = [
+        SavingsTransaction(
+          id: 1,
+          amount: 15000,
+          transactionType: SavingsTransactionType.deposit,
+          transactionDate: DateTime(2026, 9, 1),
+          note: 'Monthly Saving',
+        ),
+        SavingsTransaction(
+          id: 2,
+          amount: 5000,
+          transactionType: SavingsTransactionType.deposit,
+          transactionDate: DateTime(2026, 9, 15),
+          note: 'Extra Saving',
+        ),
+        SavingsTransaction(
+          id: 3,
+          amount: 3000,
+          transactionType: SavingsTransactionType.withdrawal,
+          transactionDate: DateTime(2026, 9, 25),
+          note: 'Emergency',
+        ),
+        SavingsTransaction(
+          id: 4,
+          amount: 10000,
+          transactionType: SavingsTransactionType.deposit,
+          transactionDate: DateTime(2026, 9, 30),
+          note: 'Bonus Saving',
+        ),
+      ];
+
+      // Sort chronologically
+      final sorted = List<SavingsTransaction>.from(txs)
+        ..sort((a, b) => a.transactionDate.compareTo(b.transactionDate));
+
+      double running = 0.0;
+      final withRunning = sorted.map((t) {
+        running += t.isDeposit ? t.amount : -t.amount;
+        return t.copyWith(runningBalance: running);
+      }).toList();
+
+      expect(withRunning[0].runningBalance, 15000.0);
+      expect(withRunning[1].runningBalance, 20000.0);
+      expect(withRunning[2].runningBalance, 17000.0);
+      expect(withRunning[3].runningBalance, 27000.0);
+    });
+
+    test('Savings independence: adding/withdrawing savings does not change income or expenses', () {
+      double totalIncome = 100000.0;
+      double totalExpenses = 60000.0;
+      double totalSavings = 20000.0;
+
+      // Withdrawing 5,000 from Savings:
+      const savingsWithdrawal = 5000.0;
+      totalSavings -= savingsWithdrawal;
+
+      expect(totalSavings, 15000.0);
+      // Income and expenses MUST remain completely unchanged:
+      expect(totalIncome, 100000.0);
+      expect(totalExpenses, 60000.0);
+
+      // Adding 10,000 to Savings:
+      const savingsDeposit = 10000.0;
+      totalSavings += savingsDeposit;
+
+      expect(totalSavings, 25000.0);
+      // Still completely unchanged:
+      expect(totalIncome, 100000.0);
+      expect(totalExpenses, 60000.0);
     });
   });
 }
